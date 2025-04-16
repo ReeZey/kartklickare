@@ -3,18 +3,10 @@
   "productName": "kartklickare",
   "version": "0.1.0",
   "identifier": "com.github.reezey.kartklickare",
-  "build": {
-    "frontendDist": "../src"
-  },
+  "build": {},
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "kartklickare",
-        "width": 800,
-        "height": 600
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
