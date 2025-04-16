@@ -1,3 +1,4 @@
+use directories::BaseDirs;
 use tauri::Url;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -11,8 +12,10 @@ pub fn run() {
                     Url::parse("https://geoguessr.com/").unwrap()
                 )
             )
+            .data_directory(BaseDirs::new().unwrap().data_local_dir().join("kartklickare"))
             .build()?;
 
+            //webview_window.open_devtools();
             webview_window.set_title("kartklickare")?;
             Ok(())
         })
