@@ -1,8 +1,16 @@
 use directories::BaseDirs;
 use tauri::Url;
+use discord_rich_presence::{activity::{Activity, Timestamps}, DiscordIpc, DiscordIpcClient};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let mut client = DiscordIpcClient::new("1366798864249786468").unwrap();
+
+    client.connect().unwrap();
+    client.set_activity(Activity::new()
+        .state("laddar...")
+    ).unwrap();
+    
     tauri::Builder::default()
         .setup(|app| {
             let webview_window = tauri::WebviewWindowBuilder::new(
@@ -22,4 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+
+    println!("Tauri app closed, disconnecting Discord IPC client");
+    client.close().unwrap();
 }
