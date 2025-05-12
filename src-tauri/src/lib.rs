@@ -1,5 +1,6 @@
 use directories::BaseDirs;
-use tauri::Url;
+use tauri::{Manager, Url};
+use tokio::sync::Mutex;
 
 mod navigation;
 
@@ -8,6 +9,7 @@ mod navigation;
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
+            app.manage(Mutex::new(navigation::PlayerInfo::default()));
             let webview_window = tauri::WebviewWindowBuilder::new(
                 app, 
                 "label", 
@@ -17,7 +19,7 @@ pub fn run() {
             )
             .data_directory(BaseDirs::new().unwrap().data_local_dir().join("kartklickare"))
             .build()?;
-
+            
             webview_window.open_devtools();
             webview_window.set_title("kartklickare")?;
             Ok(())
@@ -26,6 +28,7 @@ pub fn run() {
         .plugin(navigation::init())
         .invoke_handler(tauri::generate_handler![
             navigation::game_data,
+            navigation::set_player_info,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
