@@ -178,13 +178,14 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
             "/live-challenge",
             "/duels",
             "/battle-royale",
-            "/bullseye"
+            "/bullseye",
+            "/team-duels",
         ];
 
         let mut last_path = window.url().unwrap().path().to_string();
         
         loop {
-            let current_path = window.url().unwrap().path().to_string();
+            let mut current_path = window.url().unwrap().path().to_string();
 
             
             let is_live_game = multi_player_games.iter().any(|&game| current_path.starts_with(game));
@@ -219,6 +220,10 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
                     .split("-").map(|f| f.to_string()).collect::<Vec<String>>()
                     .iter_mut().map(|f| f.remove(0).to_uppercase().to_string() + f)
                     .collect::<Vec<String>>().join(" ");
+                
+                if current_path.contains("/team-") {
+                    current_path = current_path.replace("team-", "");
+                }
 
 
                 let js = format!(r#"
