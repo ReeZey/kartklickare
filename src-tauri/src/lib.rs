@@ -3,7 +3,7 @@ use tauri::{Manager, Url};
 use tokio::sync::Mutex;
 
 mod navigation;
-
+mod callback;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -26,10 +26,7 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(navigation::init())
-        .invoke_handler(tauri::generate_handler![
-            navigation::game_data,
-            navigation::set_player_info,
-        ])
+        .invoke_handler(tauri::generate_handler![callback::cb,])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

@@ -2,12 +2,15 @@ use std::time::Duration;
 
 use discord_rich_presence::{activity::Activity, DiscordIpc, DiscordIpcClient};
 use serde_json::{Map, Value};
-use tauri::{plugin::{Builder, TauriPlugin}, Manager, Runtime, Webview, WebviewWindow};
+use tauri::{plugin::{Builder, TauriPlugin}, Manager, Runtime, Webview};
 use tokio::sync::Mutex;
+
+use crate::callback;
 
 const LIVE_API: &str = "https://game-server.geoguessr.com/api";
 const OFFLINE_API: &str = "https://www.geoguessr.com/api/v3/games";
 const PLAYER_API: &str = "https://www.geoguessr.com/api/v3/profiles/";
+const MAP_API: &str = "https://www.geoguessr.com/api/maps";
 
 #[derive(Default)]
 pub struct PlayerInfo {
@@ -16,122 +19,6 @@ pub struct PlayerInfo {
 
     pub discord_client: Option<DiscordIpcClient>,
 }
-
-#[tauri::command]
-pub async fn game_data(window: WebviewWindow, json: Map<String, Value>) {
-    /*
-    let round = json["round"].as_u64().unwrap();
-    let max_rounds = json["roundCount"].as_u64().unwrap();
-    let map_name = json["mapName"].as_str().unwrap();
-    let score = json["player"]["totalScore"]["amount"].as_str().unwrap();
-    let score_type = json["player"]["totalScore"]["unit"].as_str().unwrap();
-    let mode = json["mode"].as_str().unwrap();
-    */
-
-    //println!("Game data: {:?}", json);
-
-    let current_round: u64;
-    let max_rounds: u64;
-    let mode: &str;
-    let map_name: &str;
-    let total_score: u64;
-    let game_type;
-
-    match json["game_type"].as_str() {
-        Some("offline") => {
-            current_round = json["round"].as_u64().unwrap();
-            max_rounds = json["roundCount"].as_u64().unwrap();
-            mode = json["mode"].as_str().unwrap();
-            map_name = json["mapName"].as_str().unwrap();
-            total_score = json["player"]["totalScore"]["amount"].as_str().unwrap().parse().unwrap();
-            game_type = json["game_type"].as_str().unwrap();
-        },
-        Some("live") => {
-            current_round = json["currentRoundNumber"].as_u64().unwrap();
-            mode = json["game_mode"].as_str().unwrap();
-            if json.get("aggregatedAnswerStats") != None {
-                game_type = "Quiz";
-            } else {
-                game_type = json["game_type"].as_str().unwrap();
-            }
-            if json.get("options") == None {
-                map_name = "Battle Royale";
-            } else {
-                if json.get("mapName") != None {
-                    map_name = json["mapName"].as_str().unwrap();
-                } else {
-                    map_name = json["options"]["map"]["name"].as_str().unwrap();
-                }
-            }
-            max_rounds = 0;
-            total_score = 0;
-        }
-        _ => {
-            println!("Unknown game type");
-            return;
-        }
-    }
-    
-    let mut line1;
-    let mut line2 ;
-
-    if mode == "streak" {
-        line1 = format!("Country Streak - {}", map_name);
-        line2 = format!("Streak: {}", current_round - 1);
-    } else {
-        line1 = String::new();
-        if game_type == "Quiz" {
-            line1.push_str(game_type);
-        } else if game_type == "live" {
-            line1.push_str(&format!("{} - {}", mode, map_name));
-        } else {
-            line1.push_str(map_name);
-        }
-
-        line2 = format!("Round: {}", current_round.to_string());
-        
-        if max_rounds > 0 {
-            line2.push_str(&format!(" / {}", max_rounds));
-        }
-
-        if total_score > 0 {
-            line2.push_str(&format!(" - {} points", total_score));
-        }
-    }
-
-    let state = window.state::<Mutex<PlayerInfo>>();
-    let mut player_info = state.lock().await;
-
-    let client = player_info.discord_client.as_mut().unwrap();
-    client.set_activity(Activity::new()
-        .details(&line1)
-        .state(&line2)
-    ).unwrap();
-
-    println!("{}", line1);
-    println!("{}", line2);
-}
-
-#[tauri::command]
-pub async fn set_player_info(window: WebviewWindow, json: Map<String, Value>) {
-    println!("Set player info");
-    let state = window.state::<Mutex<PlayerInfo>>();
-
-    let mut player_info = state.lock().await;
-
-    player_info.player_name = json["user"]["nick"].as_str().unwrap().to_string();
-    player_info.player_id = json["user"]["id"].as_str().unwrap().to_string();
-
-    let mut client = DiscordIpcClient::new("1366798864249786468").unwrap();
-
-    client.connect().unwrap();
-    client.set_activity(Activity::new()
-        .state("laddar...")
-    ).unwrap();
-
-    player_info.discord_client = Some(client);
-}
-
 
 pub fn init<R: Runtime>() -> TauriPlugin<R> {
     Builder::new("navigation")
@@ -142,37 +29,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
 pub fn navigation<R: Runtime>(window: Webview<R>) {
     tauri::async_runtime::spawn( async move {
 
-        let js = format!(r#"
-        (async () => {{
-            let request = await fetch('{}', {{
-                method: 'GET',
-                credentials: 'include'
-            }});
-            let response = await request.json();
-            
-            console.log(response);
-
-            window.__TAURI__.core.invoke('set_player_info', {{ 
-                json: response
-            }});
-        }})();
-        "#, PLAYER_API);
-
-        window.eval(js).unwrap();
-
-        let mut name: String;
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-
-            let state = window.state::<Mutex<PlayerInfo>>();
-
-            name = state.lock().await.player_name.clone();
-            if !name.is_empty() {
-                break;
-            }
-        }
-
-        println!("Player name: {}", name);
+        let response: Value = callback::send_request(&window, PLAYER_API, None).await.unwrap();
+        setup_user(&window, response).await;
 
         let multi_player_games = vec![
             "/live-challenge",
@@ -225,45 +83,30 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
                     current_path = current_path.replace("team-", "");
                 }
 
+                let mut extra = Map::new();
+                extra.insert("game_type".to_string(), Value::String("live".to_string()));
+                extra.insert("game_mode".to_string(), Value::String(game_mode));
 
-                let js = format!(r#"
-                (async () => {{
-                    let request = await fetch('{}', {{
-                        method: 'GET',
-                        credentials: 'include'
-                    }});
-                    let response = await request.json();
+                let json = callback::send_request(
+                    &window, 
+                    &format!("{}/{}", LIVE_API, current_path), 
+                    Some(Value::Object(extra))
+                ).await.unwrap();
 
-                    response.game_type = 'live';
-                    response.game_mode = '{}';
-                    
-                    window.__TAURI__.core.invoke('game_data', {{ 
-                        json: response
-                    }});
-                }})();
-                "#, format!("{}{}", LIVE_API, current_path), game_mode);
-
-                window.eval(js).unwrap();
+                handle_game_data(&window, json).await;
             } else if is_offline_game {
                 println!("Detected offline game");
 
-                let js = format!(r#"
-                (async () => {{
-                    let request = await fetch('{}', {{
-                        method: 'GET',
-                        credentials: 'include'
-                    }});
-                    let response = await request.json();
+                let mut extra = Map::new();
+                extra.insert("game_type".to_string(), Value::String("offline".to_string()));
 
-                    response.game_type = 'offline';
-                    
-                    window.__TAURI__.core.invoke('game_data', {{ 
-                        json: response
-                    }});
-                }})();
-                "#, format!("{}/{}",OFFLINE_API, current_path.replace("/game/", "")));
+                let json = callback::send_request(
+                    &window, 
+                    &format!("{}/{}", OFFLINE_API, current_path.replace("/game/", "")), 
+                    Some(Value::Object(extra))
+                ).await.unwrap();
 
-                window.eval(js).unwrap();
+                handle_game_data(&window, json).await;
             } else {
                 let state = window.state::<Mutex<PlayerInfo>>();
                 let mut player_info = state.lock().await;
@@ -271,7 +114,7 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
                 let lookup_urls = [
                     ("/", "In Menu", true),
                     ("/me", "Profile", true),
-                    ("/maps", "Browsing maps",  true),
+                    ("/maps", "Browsing maps", true),
                     ("/shop", "Shopping!", false),
                     ("/singleplayer", "Campaign", false),
                     ("/multiplayer", "Looking for game...", true),
@@ -280,10 +123,20 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
                     ("/competitive-streak", "City streak", false)
                 ];
 
-                let (str, print_path) = lookup_urls.iter().rev().find(|(prefix, _, _)| current_path.starts_with(prefix)).map(|f| (f.1, f.2)).unwrap();
+                let (key, mut title_text, print_path) = lookup_urls.iter().rev().find(|(prefix, _, _)| current_path.starts_with(prefix)).map(|f| (f.0, f.1, f.2)).unwrap();
                 
+                if key.starts_with("/maps") {
+                    let json = callback::send_request(
+                        &window, 
+                        &format!("{}/{}", MAP_API, current_path.replace("/maps/", "")), 
+                        None
+                    ).await.unwrap();
 
-                let mut activity: Activity = Activity::new().details(str);
+                    current_path = json["name"].as_str().unwrap().to_string();
+                    title_text = "Looking at map";
+                }
+
+                let mut activity: Activity = Activity::new().details(title_text);
 
                 if print_path {
                     activity = activity.state(&current_path);
@@ -296,4 +149,103 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     });
+}
+
+async fn setup_user<R: Runtime>(window: &Webview<R>, json: Value) {
+    let state = window.state::<Mutex<PlayerInfo>>();
+
+    let mut player_info = state.lock().await;
+
+    player_info.player_name = json["user"]["nick"].as_str().unwrap().to_string();
+    player_info.player_id = json["user"]["id"].as_str().unwrap().to_string();
+
+    let mut client = DiscordIpcClient::new("1366798864249786468").unwrap();
+
+    client.connect().unwrap();
+    client.set_activity(Activity::new()
+        .details("Just started!")
+    ).unwrap();
+
+    player_info.discord_client = Some(client);
+}
+
+pub async fn handle_game_data<R: Runtime>(window: &Webview<R>, json: Value) {
+    //println!("Game data: {:?}", json);
+
+    let current_round: u64;
+    let max_rounds: u64;
+    let mode: &str;
+    let map_name: &str;
+    let total_score: u64;
+    let game_type;
+
+    match json["game_type"].as_str() {
+        Some("offline") => {
+            current_round = json["round"].as_u64().unwrap();
+            max_rounds = json["roundCount"].as_u64().unwrap();
+            mode = json["mode"].as_str().unwrap();
+            map_name = json["mapName"].as_str().unwrap();
+            total_score = json["player"]["totalScore"]["amount"].as_str().unwrap().parse().unwrap();
+            game_type = json["game_type"].as_str().unwrap();
+        },
+        Some("live") => {
+            current_round = json["currentRoundNumber"].as_u64().unwrap();
+            mode = json["game_mode"].as_str().unwrap();
+            if json.get("aggregatedAnswerStats") != None {
+                game_type = "Quiz";
+            } else {
+                game_type = json["game_type"].as_str().unwrap();
+            }
+            if json.get("options") == None {
+                map_name = "Battle Royale";
+            } else {
+                map_name = json["options"]["map"]["name"].as_str().unwrap();
+            }
+            max_rounds = 0;
+            total_score = 0;
+        }
+        _ => {
+            println!("Unknown game type");
+            return;
+        }
+    }
+    
+    let mut line1;
+    let mut line2 ;
+
+    if mode == "streak" {
+        line1 = format!("Country Streak - {}", map_name);
+        line2 = format!("Streak: {}", current_round - 1);
+    } else {
+        line1 = String::new();
+        if game_type == "Quiz" {
+            line1.push_str(game_type);
+        } else if game_type == "live" {
+            line1.push_str(&format!("{} - {}", mode, map_name));
+        } else {
+            line1.push_str(map_name);
+        }
+
+        line2 = format!("Round: {}", current_round.to_string());
+        
+        if max_rounds > 0 {
+            line2.push_str(&format!(" / {}", max_rounds));
+        }
+
+        if total_score > 0 {
+            line2.push_str(&format!(" - {} points", total_score));
+        }
+    }
+
+    let state = window.state::<Mutex<PlayerInfo>>();
+    let mut player_info = state.lock().await;
+
+    let client = player_info.discord_client.as_mut().unwrap();
+    client.set_activity(Activity::new()
+        .details(&line1)
+        .state(&line2)
+    ).unwrap();
+
+    println!("{}", line1);
+    println!("{}", line2);
 }
