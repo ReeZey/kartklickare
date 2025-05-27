@@ -126,16 +126,22 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
                 let (key, mut title_text, print_path) = lookup_urls.iter().rev().find(|(prefix, _, _)| current_path.starts_with(prefix)).map(|f| (f.0, f.1, f.2)).unwrap();
                 
                 if key.starts_with("/maps") {
-                    let json = callback::send_request(
+                    let response = callback::send_request(
                         &window, 
                         &format!("{}/{}", MAP_API, current_path.replace("/maps/", "")), 
                         None
-                    ).await.unwrap();
+                    ).await;
 
-                    current_path = json["name"].as_str().unwrap().to_string();
-                    title_text = "Looking at map";
+                    if let Ok(json) = response {
+                        current_path = json["name"].as_str().unwrap().to_string();
+                        title_text = "Looking at map";
+                    }
                 }
 
+                if current_path == "/" {
+                    current_path = "Main Menu".to_string();
+                }
+                
                 let mut activity: Activity = Activity::new().details(title_text);
 
                 if print_path {
@@ -175,7 +181,7 @@ pub async fn handle_game_data<R: Runtime>(window: &Webview<R>, json: Value) {
     let current_round: u64;
     let max_rounds: u64;
     let mode: String;
-    let map_name: String;
+    let mut map_name: String;
     let total_score: u64;
     let game_type;
 
@@ -231,12 +237,14 @@ pub async fn handle_game_data<R: Runtime>(window: &Webview<R>, json: Value) {
     let mut line2 ;
 
     if mode == "streak" {
-        line1 = format!("Country Streak - {}", map_name);
+        line1 = format!("Country Streak");
         line2 = format!("Streak: {}", current_round - 1);
     } else {
         line1 = String::new();
         if game_type == "Quiz" {
             line1.push_str(game_type);
+        } else if mode == map_name {
+            line1.push_str(&mode);
         } else if game_type == "live" {
             line1.push_str(&format!("{} - {}", mode, map_name));
         } else {
