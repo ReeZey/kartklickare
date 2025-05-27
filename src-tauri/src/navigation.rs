@@ -89,7 +89,7 @@ pub fn navigation<R: Runtime>(window: Webview<R>) {
 
                 let json = callback::send_request(
                     &window, 
-                    &format!("{}/{}", LIVE_API, current_path), 
+                    &format!("{}{}", LIVE_API, current_path), 
                     Some(Value::Object(extra))
                 ).await.unwrap();
 
@@ -174,8 +174,8 @@ pub async fn handle_game_data<R: Runtime>(window: &Webview<R>, json: Value) {
 
     let current_round: u64;
     let max_rounds: u64;
-    let mode: &str;
-    let map_name: &str;
+    let mode: String;
+    let map_name: String;
     let total_score: u64;
     let game_type;
 
@@ -183,23 +183,40 @@ pub async fn handle_game_data<R: Runtime>(window: &Webview<R>, json: Value) {
         Some("offline") => {
             current_round = json["round"].as_u64().unwrap();
             max_rounds = json["roundCount"].as_u64().unwrap();
-            mode = json["mode"].as_str().unwrap();
-            map_name = json["mapName"].as_str().unwrap();
+            mode = json["mode"].as_str().unwrap().to_string();
+            map_name = json["mapName"].as_str().unwrap().to_string();
             total_score = json["player"]["totalScore"]["amount"].as_str().unwrap().parse().unwrap();
             game_type = json["game_type"].as_str().unwrap();
         },
         Some("live") => {
             current_round = json["currentRoundNumber"].as_u64().unwrap();
-            mode = json["game_mode"].as_str().unwrap();
-            if json.get("aggregatedAnswerStats") != None {
+            mode = json["game_mode"].as_str().unwrap().to_string();
+            let stats = json.get("aggregatedAnswerStats");
+            if stats != None && !stats.unwrap().is_null() {
                 game_type = "Quiz";
             } else {
                 game_type = json["game_type"].as_str().unwrap();
             }
             if json.get("options") == None {
-                map_name = "Battle Royale";
+                map_name = "Battle Royale".to_string();
             } else {
-                map_name = json["options"]["map"]["name"].as_str().unwrap();
+                map_name = match &json["options"]["map"]["name"] {
+                    Value::String(name) => name.as_str().to_string(),
+                    _ => {
+                        match &json["options"]["mapSlug"] { 
+                            Value::String(name) => {
+                                let json = callback::send_request(
+                                    &window, 
+                                    &format!("{}/{}", MAP_API, name.as_str().to_string()), 
+                                    None
+                                ).await.unwrap();
+                                
+                                json["name"].as_str().unwrap().to_string()
+                            },
+                            _ => "Unknown Map".to_string(),
+                        }
+                    },
+                }
             }
             max_rounds = 0;
             total_score = 0;
@@ -223,7 +240,7 @@ pub async fn handle_game_data<R: Runtime>(window: &Webview<R>, json: Value) {
         } else if game_type == "live" {
             line1.push_str(&format!("{} - {}", mode, map_name));
         } else {
-            line1.push_str(map_name);
+            line1.push_str(&map_name);
         }
 
         line2 = format!("Round: {}", current_round.to_string());
